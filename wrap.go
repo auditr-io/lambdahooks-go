@@ -20,13 +20,15 @@ var (
 type PreHook interface {
 
 	// BeforeExecution executes before the handler is executed
+	// You may modify the context at this point and the modified
+	// context will be passed on to the handler
 	BeforeExecution(
 		ctx context.Context,
 		payload []byte,
 	) context.Context
 }
 
-// AddPreHook adds a pre hook to be notified after execution
+// AddPreHook adds a pre hook to be notified before execution
 func AddPreHook(hook PreHook) {
 	preHooks = append(preHooks, hook)
 }
