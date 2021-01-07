@@ -18,6 +18,20 @@ type person struct {
 
 type recordHook struct {
 	mock.Mock
+
+	preHookFunc func(
+		h *recordHook,
+		ctx context.Context,
+		payload []byte,
+	) context.Context
+
+	postHookFunc func(
+		h *recordHook,
+		ctx context.Context,
+		payload []byte,
+		returnValue interface{},
+		err interface{},
+	)
 }
 
 type contextKey string
@@ -28,21 +42,16 @@ func (h *recordHook) BeforeExecution(
 	ctx context.Context,
 	payload []byte,
 ) context.Context {
-	h.Called(ctx, payload)
-	ctx = context.WithValue(ctx, ctxKey, "value")
-
-	return ctx
+	return h.preHookFunc(h, ctx, payload)
 }
 
 func (h *recordHook) AfterExecution(
 	ctx context.Context,
 	payload []byte,
 	returnValue interface{},
-	err error,
+	err interface{},
 ) {
-	returnInterface := returnValue.(*interface{})
-	p := (*returnInterface).(*person)
-	h.Called(ctx, payload, p, err)
+	h.postHookFunc(h, ctx, payload, returnValue, err)
 }
 
 type mockStarterFunc struct {
@@ -116,15 +125,23 @@ func TestWrap_RunsPreHook(t *testing.T) {
 		return p, nil
 	}
 
-	record := &recordHook{}
+	record := &recordHook{
+		preHookFunc: func(
+			h *recordHook,
+			ctx context.Context,
+			payload []byte,
+		) context.Context {
+			h.MethodCalled("BeforeExecution", ctx, payload)
+			return ctx
+		},
+	}
+
 	AddPreHook(record)
 	t.Cleanup(func() {
 		RemovePreHook(record)
 	})
 
 	wrappedHandler := Wrap(handler)
-	assert.IsType(t, *new(lambdaHandler), wrappedHandler)
-	assert.Implements(t, new(awslambda.Handler), wrappedHandler)
 
 	pIn := &person{
 		Name: "x",
@@ -156,15 +173,23 @@ func TestWrap_AppliesContextFromPreHook(t *testing.T) {
 		return p, nil
 	}
 
-	record := &recordHook{}
+	record := &recordHook{
+		preHookFunc: func(
+			h *recordHook,
+			ctx context.Context,
+			payload []byte,
+		) context.Context {
+			h.MethodCalled("BeforeExecution", ctx, payload)
+			return context.WithValue(ctx, ctxKey, "value")
+		},
+	}
+
 	AddPreHook(record)
 	t.Cleanup(func() {
 		RemovePreHook(record)
 	})
 
 	wrappedHandler := Wrap(handler)
-	assert.IsType(t, *new(lambdaHandler), wrappedHandler)
-	assert.Implements(t, new(awslambda.Handler), wrappedHandler)
 
 	pIn := &person{
 		Name: "x",
@@ -195,15 +220,26 @@ func TestWrap_RunsPostHook(t *testing.T) {
 		return p, nil
 	}
 
-	record := &recordHook{}
+	record := &recordHook{
+		postHookFunc: func(
+			h *recordHook,
+			ctx context.Context,
+			payload []byte,
+			returnValue interface{},
+			err interface{},
+		) {
+			returnInterface := returnValue.(*interface{})
+			p := (*returnInterface).(*person)
+			h.MethodCalled("AfterExecution", ctx, payload, p, err)
+		},
+	}
+
 	AddPostHook(record)
 	t.Cleanup(func() {
 		RemovePostHook(record)
 	})
 
 	wrappedHandler := Wrap(handler)
-	assert.IsType(t, *new(lambdaHandler), wrappedHandler)
-	assert.Implements(t, new(awslambda.Handler), wrappedHandler)
 
 	pIn := &person{
 		Name: "x",
@@ -227,6 +263,53 @@ func TestWrap_RunsPostHook(t *testing.T) {
 	var pOut *person
 	err = json.Unmarshal(resBytes, &pOut)
 	assert.Equal(t, pIn, pOut)
+}
+
+func TestWrap_RunsPostHookOnPanic(t *testing.T) {
+	expectedPanicErr := "argghhhh!"
+
+	handler := func(ctx context.Context, p *person) (*person, error) {
+		panic(expectedPanicErr)
+	}
+
+	record := &recordHook{
+		postHookFunc: func(
+			h *recordHook,
+			ctx context.Context,
+			payload []byte,
+			returnValue interface{},
+			err interface{},
+		) {
+			e := err.(string)
+			h.MethodCalled("AfterExecution", ctx, payload, returnValue, e)
+		},
+	}
+
+	AddPostHook(record)
+	t.Cleanup(func() {
+		RemovePostHook(record)
+	})
+
+	wrappedHandler := Wrap(handler)
+	pIn := &person{
+		Name: "x",
+		Age:  10,
+	}
+	payload, err := json.Marshal(pIn)
+	assert.NoError(t, err)
+
+	ctx := context.Background()
+	record.
+		On("AfterExecution", ctx, payload, nil, expectedPanicErr).
+		Once()
+
+	awslambdaHandler := wrappedHandler.(awslambda.Handler)
+	assert.PanicsWithValue(t, expectedPanicErr, func() {
+		awslambdaHandler.Invoke(
+			ctx,
+			payload,
+		)
+	})
 }
 
 func TestAddPreHook_AddsHook(t *testing.T) {

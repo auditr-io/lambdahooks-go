@@ -58,7 +58,7 @@ type PostHook interface {
 		ctx context.Context,
 		payload []byte,
 		returnValue interface{},
-		err error,
+		err interface{},
 	)
 }
 
@@ -158,7 +158,14 @@ func Wrap(handlerFunc interface{}) awslambda.Handler {
 
 	return lambdaHandler(
 		func(ctx context.Context, payload []byte) (interface{}, error) {
-			// TODO: run post hook on error
+			defer func() {
+				if err := recover(); err != nil {
+					// Run post hooks in case of panic
+					runPostHooks(ctx, payload, nil, err)
+					panic(err)
+				}
+			}()
+
 			// TODO: run post hook on timeout
 
 			var args []reflect.Value
@@ -285,7 +292,7 @@ func runPostHooks(
 	ctx context.Context,
 	payload []byte,
 	returnValue interface{},
-	err error,
+	err interface{},
 ) {
 	for _, hook := range postHooks {
 		hook.AfterExecution(ctx, payload, returnValue, err)
