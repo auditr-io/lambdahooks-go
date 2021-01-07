@@ -63,6 +63,93 @@ func (m *mockStarterFunc) StartHandler(handler awslambda.Handler) {
 	m.Called(handler)
 }
 
+func TestInit_OverridesDeadlineCushion(t *testing.T) {
+	origDeadlineCushion := deadlineCushion
+	t.Cleanup(func() {
+		deadlineCushion = origDeadlineCushion
+	})
+
+	newDeadlineCushion := 1 * time.Second
+
+	Init(
+		WithDeadlineCushion(newDeadlineCushion),
+	)
+
+	assert.Equal(t, newDeadlineCushion, deadlineCushion)
+}
+
+func TestInit_AddsPreHooks(t *testing.T) {
+	hooks := []PreHook{
+		&recordHook{
+			preHookFunc: func(
+				h *recordHook,
+				ctx context.Context,
+				payload []byte,
+			) context.Context {
+				return ctx
+			},
+		},
+		&recordHook{
+			preHookFunc: func(
+				h *recordHook,
+				ctx context.Context,
+				payload []byte,
+			) context.Context {
+				return ctx
+			},
+		},
+	}
+
+	t.Cleanup(func() {
+		for _, hook := range hooks {
+			RemovePreHook(hook)
+		}
+	})
+
+	Init(
+		WithPreHooks(hooks...),
+	)
+
+	assert.Equal(t, hooks, preHooks)
+}
+
+func TestInit_AddsPostHooks(t *testing.T) {
+	hooks := []PostHook{
+		&recordHook{
+			postHookFunc: func(
+				h *recordHook,
+				ctx context.Context,
+				payload []byte,
+				returnValue interface{},
+				err interface{},
+			) {
+			},
+		},
+		&recordHook{
+			postHookFunc: func(
+				h *recordHook,
+				ctx context.Context,
+				payload []byte,
+				returnValue interface{},
+				err interface{},
+			) {
+			},
+		},
+	}
+
+	t.Cleanup(func() {
+		for _, hook := range hooks {
+			RemovePostHook(hook)
+		}
+	})
+
+	Init(
+		WithPostHooks(hooks...),
+	)
+
+	assert.Equal(t, hooks, postHooks)
+}
+
 func TestStart_StartsHandler(t *testing.T) {
 	handler := func(ctx context.Context, e *person) (*person, error) {
 		return e, nil

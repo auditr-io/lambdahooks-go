@@ -11,8 +11,17 @@ import (
 	awslambda "github.com/aws/aws-lambda-go/lambda"
 )
 
+const (
+	// MaxDeadlineCushion is the timeout limit for deadline cushion.
+	// Deadline cushion should not exceed lambda timeout
+	// https://docs.aws.amazon.com/lambda/latest/dg/gettingstarted-limits.html
+	// But setting the cushion at this limit effectively signals timeout
+	// to post hooks by default
+	MaxDeadlineCushion time.Duration = 15 * time.Minute
+)
+
 var (
-	deadlineCushion time.Duration                   = 500 * time.Millisecond
+	deadlineCushion time.Duration                   = 50 * time.Millisecond
 	preHooks        []PreHook                       = []PreHook{}
 	postHooks       []PostHook                      = []PostHook{}
 	starterFunc     func(handler awslambda.Handler) = awslambda.StartHandler
@@ -106,6 +115,53 @@ func (handler lambdaHandler) Invoke(ctx context.Context, payload []byte) ([]byte
 	}
 
 	return responseBytes, nil
+}
+
+// Option is an option to override defaults
+type Option func() error
+
+// Init sets up the hooks before use
+// Overrides defaults as needed
+func Init(options ...Option) error {
+	for _, opt := range options {
+		if err := opt(); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+// WithDeadlineCushion overrides the default deadline cushion with given client
+func WithDeadlineCushion(d time.Duration) Option {
+	return func() error {
+		if deadlineCushion > MaxDeadlineCushion {
+			return fmt.Errorf("deadlineCushion cannot exceed %v", MaxDeadlineCushion)
+		}
+
+		deadlineCushion = d
+		return nil
+	}
+}
+
+// WithPreHooks adds a list of pre hooks in the order they are provided
+func WithPreHooks(hooks ...PreHook) Option {
+	return func() error {
+		for _, hook := range hooks {
+			AddPreHook(hook)
+		}
+		return nil
+	}
+}
+
+// WithPostHooks adds a list of post hooks in the order they are provided
+func WithPostHooks(hooks ...PostHook) Option {
+	return func() error {
+		for _, hook := range hooks {
+			AddPostHook(hook)
+		}
+		return nil
+	}
 }
 
 // Start wraps the handler and starts the AWS lambda handler
