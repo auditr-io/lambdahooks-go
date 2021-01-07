@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"testing"
+	"time"
 
 	awslambda "github.com/aws/aws-lambda-go/lambda"
 	"github.com/stretchr/testify/assert"
@@ -350,4 +351,138 @@ func TestRemovePostHook_RemovesHook(t *testing.T) {
 	lenPreRemove := len(postHooks)
 	RemovePostHook(record)
 	assert.Equal(t, lenPreRemove-1, len(postHooks))
+}
+
+func TestHandleTimeout_ReturnsAtDeadline(t *testing.T) {
+	ctx, cancel := context.WithDeadline(context.Background(), time.Now())
+	defer func() {
+		cancel()
+	}()
+
+	payload := []byte("")
+
+	record := &recordHook{
+		postHookFunc: func(
+			h *recordHook,
+			ctx context.Context,
+			payload []byte,
+			returnValue interface{},
+			err interface{},
+		) {
+			e := err.(timeoutError)
+			h.MethodCalled("AfterExecution", ctx, payload, returnValue, e)
+		},
+	}
+
+	AddPostHook(record)
+	t.Cleanup(func() {
+		RemovePostHook(record)
+	})
+
+	handleTimeout(ctx, payload)
+	record.AssertNotCalled(t, "AfterExecution", ctx, payload, nil, timeoutError{})
+}
+
+func TestHandleTimeout_ReturnsAtThreshold(t *testing.T) {
+	var origDeadlineCushion time.Duration
+	deadlineCushion, origDeadlineCushion = 0*time.Millisecond, deadlineCushion
+	ctx, cancel := context.WithDeadline(context.Background(), time.Now().Add(deadlineCushion))
+	defer func() {
+		cancel()
+	}()
+
+	payload := []byte("")
+
+	record := &recordHook{
+		postHookFunc: func(
+			h *recordHook,
+			ctx context.Context,
+			payload []byte,
+			returnValue interface{},
+			err interface{},
+		) {
+			e := err.(timeoutError)
+			h.MethodCalled("AfterExecution", ctx, payload, returnValue, e)
+		},
+	}
+
+	AddPostHook(record)
+	t.Cleanup(func() {
+		deadlineCushion = origDeadlineCushion
+		RemovePostHook(record)
+	})
+
+	handleTimeout(ctx, payload)
+	record.AssertNotCalled(t, "AfterExecution", ctx, payload, nil, timeoutError{})
+}
+
+func TestHandleTimeout_ReturnsAtCompletion(t *testing.T) {
+	var origDeadlineCushion time.Duration
+	deadlineCushion, origDeadlineCushion = 10*time.Millisecond, deadlineCushion
+	ctx, cancel := context.WithDeadline(context.Background(), time.Now().Add(2*deadlineCushion))
+	defer func() {
+		cancel()
+	}()
+
+	payload := []byte("")
+
+	record := &recordHook{
+		postHookFunc: func(
+			h *recordHook,
+			ctx context.Context,
+			payload []byte,
+			returnValue interface{},
+			err interface{},
+		) {
+			e := err.(timeoutError)
+			h.MethodCalled("AfterExecution", ctx, payload, returnValue, e)
+		},
+	}
+
+	AddPostHook(record)
+	t.Cleanup(func() {
+		deadlineCushion = origDeadlineCushion
+		RemovePostHook(record)
+	})
+
+	cancel()
+	handleTimeout(ctx, payload)
+	record.AssertNotCalled(t, "AfterExecution", ctx, payload, nil, timeoutError{})
+}
+
+func TestHandleTimeout_RunsPostHooksBeforeThreshold(t *testing.T) {
+	var origDeadlineCushion time.Duration
+	deadlineCushion, origDeadlineCushion = 10*time.Millisecond, deadlineCushion
+	ctx, cancel := context.WithDeadline(context.Background(), time.Now().Add(2*deadlineCushion))
+	defer func() {
+		cancel()
+	}()
+
+	payload := []byte("")
+
+	record := &recordHook{
+		postHookFunc: func(
+			h *recordHook,
+			ctx context.Context,
+			payload []byte,
+			returnValue interface{},
+			err interface{},
+		) {
+			e := err.(timeoutError)
+			h.MethodCalled("AfterExecution", ctx, payload, returnValue, e)
+		},
+	}
+
+	record.
+		On("AfterExecution", ctx, payload, nil, timeoutError{}).
+		Once()
+
+	AddPostHook(record)
+	t.Cleanup(func() {
+		deadlineCushion = origDeadlineCushion
+		RemovePostHook(record)
+	})
+
+	handleTimeout(ctx, payload)
+	assert.True(t, record.AssertExpectations(t))
 }

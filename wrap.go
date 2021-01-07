@@ -5,15 +5,17 @@ import (
 	"encoding/json"
 	"fmt"
 	"reflect"
+	"time"
 
 	"github.com/aws/aws-lambda-go/events"
 	awslambda "github.com/aws/aws-lambda-go/lambda"
 )
 
 var (
-	preHooks    []PreHook                       = []PreHook{}
-	postHooks   []PostHook                      = []PostHook{}
-	starterFunc func(handler awslambda.Handler) = awslambda.StartHandler
+	deadlineCushion time.Duration                   = 500 * time.Millisecond
+	preHooks        []PreHook                       = []PreHook{}
+	postHooks       []PostHook                      = []PostHook{}
+	starterFunc     func(handler awslambda.Handler) = awslambda.StartHandler
 )
 
 // PreHook is a hook that's invoked before the handler is executed
@@ -166,7 +168,7 @@ func Wrap(handlerFunc interface{}) awslambda.Handler {
 				}
 			}()
 
-			// TODO: run post hook on timeout
+			go handleTimeout(ctx, payload)
 
 			var args []reflect.Value
 			var eventValue reflect.Value
@@ -276,10 +278,7 @@ func validateReturns(handler reflect.Type) error {
 }
 
 // runPreHooks executes all pre hooks in the order they are registered
-func runPreHooks(
-	ctx context.Context,
-	payload []byte,
-) context.Context {
+func runPreHooks(ctx context.Context, payload []byte) context.Context {
 	for _, hook := range preHooks {
 		ctx = hook.BeforeExecution(ctx, payload)
 	}
@@ -297,4 +296,43 @@ func runPostHooks(
 	for _, hook := range postHooks {
 		hook.AfterExecution(ctx, payload, returnValue, err)
 	}
+}
+
+// handleTimeout attempts to run post hooks if there's time left
+// If the handler comes close to the deadline, try to run the post
+// hooks to capture the timeout result. The choice of deadlineCushion
+// is important. Too much cushion, the post hooks may prematurely fire before
+// the handler completes in time. This causes the post hooks to get a
+// signal conflicting with the actual result. The opposite may not leave
+// enough time for all post hooks to run to completion. In general, the
+// smaller the cushion the more accurate the signal
+func handleTimeout(ctx context.Context, payload []byte) {
+	deadline, _ := ctx.Deadline()
+	if deadline.IsZero() {
+		return
+	}
+
+	threshold := deadline.Add(-deadlineCushion)
+	if time.Now().After(threshold) {
+		return
+	}
+
+	timer := time.NewTimer(time.Until(threshold))
+	timeoutc := timer.C
+	select {
+	case <-timeoutc:
+		runPostHooks(ctx, payload, nil, timeoutError{})
+		return
+	case <-ctx.Done():
+		timer.Stop()
+		return
+	}
+}
+
+// timeoutError indicates the handler timed out before it could complete
+type timeoutError struct{}
+
+// Error returns a string describing the timeout error
+func (t timeoutError) Error() string {
+	return fmt.Sprintf("Lambda has timed out")
 }
