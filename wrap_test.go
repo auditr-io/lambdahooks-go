@@ -1,4 +1,4 @@
-package lambda
+package lambdahooks
 
 import (
 	"context"
@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	awslambda "github.com/aws/aws-lambda-go/lambda"
+	"github.com/aws/aws-lambda-go/lambda"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 )
@@ -59,7 +59,7 @@ type mockStarterFunc struct {
 	mock.Mock
 }
 
-func (m *mockStarterFunc) StartHandler(handler awslambda.Handler) {
+func (m *mockStarterFunc) StartHandler(handler lambda.Handler) {
 	m.Called(handler)
 }
 
@@ -165,10 +165,10 @@ func TestStart_StartsHandler(t *testing.T) {
 
 	m := &mockStarterFunc{}
 	m.
-		On("StartHandler", mock.AnythingOfType("lambda.lambdaHandler")).
+		On("StartHandler", mock.AnythingOfType("lambdahooks.lambdaHandler")).
 		Once()
 
-	var origStarterFunc func(handler awslambda.Handler)
+	var origStarterFunc func(handler lambda.Handler)
 	starterFunc, origStarterFunc = m.StartHandler, starterFunc
 	t.Cleanup(func() {
 		os.Unsetenv(lambdaPort)
@@ -187,7 +187,7 @@ func TestWrap_ReturnsInvocableHandler(t *testing.T) {
 
 	wrappedHandler := Wrap(handler)
 	assert.IsType(t, *new(lambdaHandler), wrappedHandler)
-	assert.Implements(t, new(awslambda.Handler), wrappedHandler)
+	assert.Implements(t, new(lambda.Handler), wrappedHandler)
 
 	pIn := &person{
 		Name: "x",
@@ -196,7 +196,7 @@ func TestWrap_ReturnsInvocableHandler(t *testing.T) {
 	payload, err := json.Marshal(pIn)
 	assert.NoError(t, err)
 
-	awslambdaHandler := wrappedHandler.(awslambda.Handler)
+	awslambdaHandler := wrappedHandler.(lambda.Handler)
 	resBytes, err := awslambdaHandler.Invoke(
 		context.Background(),
 		payload,
@@ -243,7 +243,7 @@ func TestWrap_RunsPreHook(t *testing.T) {
 		On("BeforeExecution", ctx, payload).
 		Once()
 
-	awslambdaHandler := wrappedHandler.(awslambda.Handler)
+	awslambdaHandler := wrappedHandler.(lambda.Handler)
 	resBytes, err := awslambdaHandler.Invoke(
 		ctx,
 		payload,
@@ -291,7 +291,7 @@ func TestWrap_AppliesContextFromPreHook(t *testing.T) {
 		On("BeforeExecution", ctx, payload).
 		Once()
 
-	awslambdaHandler := wrappedHandler.(awslambda.Handler)
+	awslambdaHandler := wrappedHandler.(lambda.Handler)
 	resBytes, err := awslambdaHandler.Invoke(
 		ctx,
 		payload,
@@ -341,7 +341,7 @@ func TestWrap_RunsPostHook(t *testing.T) {
 		On("AfterExecution", ctx, payload, pIn, nil).
 		Once()
 
-	awslambdaHandler := wrappedHandler.(awslambda.Handler)
+	awslambdaHandler := wrappedHandler.(lambda.Handler)
 	resBytes, err := awslambdaHandler.Invoke(
 		ctx,
 		payload,
@@ -391,7 +391,7 @@ func TestWrap_RunsPostHookOnPanic(t *testing.T) {
 		On("AfterExecution", ctx, payload, nil, expectedPanicErr).
 		Once()
 
-	awslambdaHandler := wrappedHandler.(awslambda.Handler)
+	awslambdaHandler := wrappedHandler.(lambda.Handler)
 	assert.PanicsWithValue(t, expectedPanicErr, func() {
 		awslambdaHandler.Invoke(
 			ctx,
@@ -473,7 +473,10 @@ func TestHandleTimeout_ReturnsAtDeadline(t *testing.T) {
 func TestHandleTimeout_ReturnsAtThreshold(t *testing.T) {
 	var origDeadlineCushion time.Duration
 	deadlineCushion, origDeadlineCushion = 0*time.Millisecond, deadlineCushion
-	ctx, cancel := context.WithDeadline(context.Background(), time.Now().Add(deadlineCushion))
+	ctx, cancel := context.WithDeadline(
+		context.Background(),
+		time.Now().Add(deadlineCushion),
+	)
 	defer func() {
 		cancel()
 	}()
@@ -506,7 +509,10 @@ func TestHandleTimeout_ReturnsAtThreshold(t *testing.T) {
 func TestHandleTimeout_ReturnsAtCompletion(t *testing.T) {
 	var origDeadlineCushion time.Duration
 	deadlineCushion, origDeadlineCushion = 10*time.Millisecond, deadlineCushion
-	ctx, cancel := context.WithDeadline(context.Background(), time.Now().Add(2*deadlineCushion))
+	ctx, cancel := context.WithDeadline(
+		context.Background(),
+		time.Now().Add(2*deadlineCushion),
+	)
 	defer func() {
 		cancel()
 	}()
@@ -540,7 +546,10 @@ func TestHandleTimeout_ReturnsAtCompletion(t *testing.T) {
 func TestHandleTimeout_RunsPostHooksBeforeThreshold(t *testing.T) {
 	var origDeadlineCushion time.Duration
 	deadlineCushion, origDeadlineCushion = 10*time.Millisecond, deadlineCushion
-	ctx, cancel := context.WithDeadline(context.Background(), time.Now().Add(2*deadlineCushion))
+	ctx, cancel := context.WithDeadline(
+		context.Background(),
+		time.Now().Add(2*deadlineCushion),
+	)
 	defer func() {
 		cancel()
 	}()

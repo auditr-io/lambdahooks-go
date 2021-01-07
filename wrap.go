@@ -1,4 +1,4 @@
-package lambda
+package lambdahooks
 
 import (
 	"context"
@@ -7,8 +7,7 @@ import (
 	"reflect"
 	"time"
 
-	"github.com/aws/aws-lambda-go/events"
-	awslambda "github.com/aws/aws-lambda-go/lambda"
+	"github.com/aws/aws-lambda-go/lambda"
 )
 
 const (
@@ -21,10 +20,10 @@ const (
 )
 
 var (
-	deadlineCushion time.Duration                   = 50 * time.Millisecond
-	preHooks        []PreHook                       = []PreHook{}
-	postHooks       []PostHook                      = []PostHook{}
-	starterFunc     func(handler awslambda.Handler) = awslambda.StartHandler
+	deadlineCushion time.Duration                = 50 * time.Millisecond
+	preHooks        []PreHook                    = []PreHook{}
+	postHooks       []PostHook                   = []PostHook{}
+	starterFunc     func(handler lambda.Handler) = lambda.StartHandler
 )
 
 // PreHook is a hook that's invoked before the handler is executed
@@ -94,9 +93,6 @@ func RemovePostHook(hook PostHook) {
 
 	postHooks = append(postHooks[:hookIndex], postHooks[hookIndex+1:]...)
 }
-
-// lambdaFunction is old
-type lambdaFunction func(context.Context, events.APIGatewayProxyRequest) (interface{}, error)
 
 // lambdaHandler is the generic function type
 type lambdaHandler func(context.Context, []byte) (interface{}, error)
@@ -194,7 +190,7 @@ func Start(handler interface{}) {
 //
 // Where "TIn" and "TOut" are types compatible with the "encoding/json" standard library.
 // See https://golang.org/pkg/encoding/json/#Unmarshal for how deserialization behaves
-func Wrap(handlerFunc interface{}) awslambda.Handler {
+func Wrap(handlerFunc interface{}) lambda.Handler {
 	if handlerFunc == nil {
 		return errorHandler(fmt.Errorf("handler is nil"))
 	}
