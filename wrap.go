@@ -16,14 +16,18 @@ const (
 	// https://docs.aws.amazon.com/lambda/latest/dg/gettingstarted-limits.html
 	// But setting the cushion at this limit effectively signals timeout
 	// to post hooks by default
-	MaxDeadlineCushion time.Duration = 15 * time.Minute
+	MaxDeadlineCushion = 15 * time.Minute
+
+	// DefaultTimeout is the default timeout limit
+	// https://docs.aws.amazon.com/lambda/latest/dg/configuration-console.html
+	DefaultTimeout = 3 * time.Second
 )
 
 var (
-	deadlineCushion time.Duration                = 50 * time.Millisecond
-	preHooks        []PreHook                    = []PreHook{}
-	postHooks       []PostHook                   = []PostHook{}
-	starterFunc     func(handler lambda.Handler) = lambda.StartHandler
+	deadlineCushion = (time.Duration)(0.2 * float64(DefaultTimeout))
+	preHooks        = []PreHook{}
+	postHooks       = []PostHook{}
+	starterFunc     = lambda.StartHandler
 )
 
 // PreHook is a hook that's invoked before the handler is executed
@@ -128,7 +132,7 @@ func Init(options ...Option) error {
 	return nil
 }
 
-// WithDeadlineCushion overrides the default deadline cushion with given client
+// WithDeadlineCushion overrides the default deadline cushion with given cushion
 func WithDeadlineCushion(d time.Duration) Option {
 	return func() error {
 		if deadlineCushion > MaxDeadlineCushion {
@@ -136,6 +140,18 @@ func WithDeadlineCushion(d time.Duration) Option {
 		}
 
 		deadlineCushion = d
+		return nil
+	}
+}
+
+// WithStarterFunc overrides the default starter function with given function
+func WithStarterFunc(fn func(lambda.Handler)) Option {
+	return func() error {
+		if fn == nil {
+			return fmt.Errorf("fn cannot be nil")
+		}
+
+		starterFunc = fn
 		return nil
 	}
 }

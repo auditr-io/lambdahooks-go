@@ -3,7 +3,6 @@ package lambdahooks
 import (
 	"context"
 	"encoding/json"
-	"os"
 	"testing"
 	"time"
 
@@ -150,18 +149,10 @@ func TestInit_AddsPostHooks(t *testing.T) {
 	assert.Equal(t, hooks, postHooks)
 }
 
-func TestStart_StartsHandler(t *testing.T) {
+func TestStart_StartsHandlerWithOverridenStarterFunc(t *testing.T) {
 	handler := func(ctx context.Context, e *person) (*person, error) {
 		return e, nil
 	}
-
-	const (
-		lambdaPort       = "_LAMBDA_SERVER_PORT"
-		lambdaRuntimeAPI = "AWS_LAMBDA_RUNTIME_API"
-	)
-
-	os.Setenv(lambdaPort, "9000")
-	os.Setenv(lambdaRuntimeAPI, "localhost")
 
 	m := &mockStarterFunc{}
 	m.
@@ -171,10 +162,12 @@ func TestStart_StartsHandler(t *testing.T) {
 	var origStarterFunc func(handler lambda.Handler)
 	starterFunc, origStarterFunc = m.StartHandler, starterFunc
 	t.Cleanup(func() {
-		os.Unsetenv(lambdaPort)
-		os.Unsetenv(lambdaRuntimeAPI)
 		starterFunc = origStarterFunc
 	})
+
+	Init(
+		WithStarterFunc(m.StartHandler),
+	)
 
 	Start(handler)
 	assert.True(t, m.AssertExpectations(t))
@@ -471,15 +464,8 @@ func TestHandleTimeout_ReturnsAtDeadline(t *testing.T) {
 }
 
 func TestHandleTimeout_ReturnsAtThreshold(t *testing.T) {
-	var origDeadlineCushion time.Duration
-	deadlineCushion, origDeadlineCushion = 0*time.Millisecond, deadlineCushion
-	ctx, cancel := context.WithDeadline(
-		context.Background(),
-		time.Now().Add(deadlineCushion),
-	)
-	defer func() {
-		cancel()
-	}()
+	origDeadlineCushion := deadlineCushion
+	newDeadlineCushion := 0 * time.Millisecond
 
 	payload := []byte("")
 
@@ -496,26 +482,31 @@ func TestHandleTimeout_ReturnsAtThreshold(t *testing.T) {
 		},
 	}
 
-	AddPostHook(record)
+	Init(
+		WithDeadlineCushion(newDeadlineCushion),
+		WithPostHooks(record),
+	)
+
 	t.Cleanup(func() {
 		deadlineCushion = origDeadlineCushion
 		RemovePostHook(record)
 	})
+
+	ctx, cancel := context.WithDeadline(
+		context.Background(),
+		time.Now().Add(newDeadlineCushion),
+	)
+	defer func() {
+		cancel()
+	}()
 
 	handleTimeout(ctx, payload)
 	record.AssertNotCalled(t, "AfterExecution", ctx, payload, nil, timeoutError{})
 }
 
 func TestHandleTimeout_ReturnsAtCompletion(t *testing.T) {
-	var origDeadlineCushion time.Duration
-	deadlineCushion, origDeadlineCushion = 10*time.Millisecond, deadlineCushion
-	ctx, cancel := context.WithDeadline(
-		context.Background(),
-		time.Now().Add(2*deadlineCushion),
-	)
-	defer func() {
-		cancel()
-	}()
+	origDeadlineCushion := deadlineCushion
+	newDeadlineCushion := 10 * time.Millisecond
 
 	payload := []byte("")
 
@@ -532,11 +523,23 @@ func TestHandleTimeout_ReturnsAtCompletion(t *testing.T) {
 		},
 	}
 
-	AddPostHook(record)
+	Init(
+		WithDeadlineCushion(newDeadlineCushion),
+		WithPostHooks(record),
+	)
+
 	t.Cleanup(func() {
 		deadlineCushion = origDeadlineCushion
 		RemovePostHook(record)
 	})
+
+	ctx, cancel := context.WithDeadline(
+		context.Background(),
+		time.Now().Add(2*newDeadlineCushion),
+	)
+	defer func() {
+		cancel()
+	}()
 
 	cancel()
 	handleTimeout(ctx, payload)
@@ -544,15 +547,8 @@ func TestHandleTimeout_ReturnsAtCompletion(t *testing.T) {
 }
 
 func TestHandleTimeout_RunsPostHooksBeforeThreshold(t *testing.T) {
-	var origDeadlineCushion time.Duration
-	deadlineCushion, origDeadlineCushion = 10*time.Millisecond, deadlineCushion
-	ctx, cancel := context.WithDeadline(
-		context.Background(),
-		time.Now().Add(2*deadlineCushion),
-	)
-	defer func() {
-		cancel()
-	}()
+	origDeadlineCushion := deadlineCushion
+	newDeadlineCushion := 10 * time.Millisecond
 
 	payload := []byte("")
 
@@ -569,11 +565,23 @@ func TestHandleTimeout_RunsPostHooksBeforeThreshold(t *testing.T) {
 		},
 	}
 
+	ctx, cancel := context.WithDeadline(
+		context.Background(),
+		time.Now().Add(2*newDeadlineCushion),
+	)
+	defer func() {
+		cancel()
+	}()
+
 	record.
 		On("AfterExecution", ctx, payload, nil, timeoutError{}).
 		Once()
 
-	AddPostHook(record)
+	Init(
+		WithDeadlineCushion(newDeadlineCushion),
+		WithPostHooks(record),
+	)
+
 	t.Cleanup(func() {
 		deadlineCushion = origDeadlineCushion
 		RemovePostHook(record)
