@@ -8,12 +8,12 @@ import (
 type PreHook interface {
 
 	// BeforeExecution executes before the handler is executed
-	// You may modify the context at this point and the modified
-	// context will be passed on to the handler
+	// You may modify the context and/or payload at this point and the modified
+	// context and payload will be passed on to the handler
 	BeforeExecution(
 		ctx context.Context,
 		payload []byte,
-	) context.Context
+	) (context.Context, []byte)
 }
 
 // AddPreHook adds a pre hook to be notified before execution
@@ -73,12 +73,12 @@ func RemovePostHook(hook PostHook) {
 }
 
 // runPreHooks executes all pre hooks in the order they are registered
-func runPreHooks(ctx context.Context, payload []byte) context.Context {
+func runPreHooks(ctx context.Context, payload []byte) (context.Context, []byte) {
 	for _, hook := range preHooks {
-		ctx = hook.BeforeExecution(ctx, payload)
+		ctx, payload = hook.BeforeExecution(ctx, payload)
 	}
 
-	return ctx
+	return ctx, payload
 }
 
 // runPostHooks executes all post hooks in the order they are registered

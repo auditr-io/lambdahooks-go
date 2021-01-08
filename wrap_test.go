@@ -23,7 +23,7 @@ type recordHook struct {
 		h *recordHook,
 		ctx context.Context,
 		payload []byte,
-	) context.Context
+	) (context.Context, []byte)
 
 	postHookFunc func(
 		h *recordHook,
@@ -41,7 +41,7 @@ const ctxKey contextKey = "key"
 func (h *recordHook) BeforeExecution(
 	ctx context.Context,
 	payload []byte,
-) context.Context {
+) (context.Context, []byte) {
 	return h.preHookFunc(h, ctx, payload)
 }
 
@@ -84,8 +84,8 @@ func TestInit_AddsPreHooks(t *testing.T) {
 				h *recordHook,
 				ctx context.Context,
 				payload []byte,
-			) context.Context {
-				return ctx
+			) (context.Context, []byte) {
+				return ctx, payload
 			},
 		},
 		&recordHook{
@@ -93,8 +93,8 @@ func TestInit_AddsPreHooks(t *testing.T) {
 				h *recordHook,
 				ctx context.Context,
 				payload []byte,
-			) context.Context {
-				return ctx
+			) (context.Context, []byte) {
+				return ctx, payload
 			},
 		},
 	}
@@ -211,9 +211,9 @@ func TestWrap_RunsPreHook(t *testing.T) {
 			h *recordHook,
 			ctx context.Context,
 			payload []byte,
-		) context.Context {
+		) (context.Context, []byte) {
 			h.MethodCalled("BeforeExecution", ctx, payload)
-			return ctx
+			return ctx, payload
 		},
 	}
 
@@ -259,9 +259,9 @@ func TestWrap_AppliesContextFromPreHook(t *testing.T) {
 			h *recordHook,
 			ctx context.Context,
 			payload []byte,
-		) context.Context {
+		) (context.Context, []byte) {
 			h.MethodCalled("BeforeExecution", ctx, payload)
-			return context.WithValue(ctx, ctxKey, "value")
+			return context.WithValue(ctx, ctxKey, "value"), payload
 		},
 	}
 

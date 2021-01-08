@@ -118,6 +118,7 @@ func WithPostHooks(hooks ...PostHook) Option {
 }
 
 // Start wraps the handler and starts the AWS lambda handler
+// TODO: do we need this here?
 func Start(handler interface{}) {
 	starterFunc(Wrap(handler))
 }
@@ -182,19 +183,20 @@ func Wrap(handlerFunc interface{}) lambda.Handler {
 			var args []reflect.Value
 			var eventValue reflect.Value
 
+			ctx, newPayload := runPreHooks(ctx, payload)
+
 			if (handlerType.NumIn() == 1 && !takesContext) || handlerType.NumIn() == 2 {
 				// Deserialize the last input argument and pass that on to the handler
 				eventType := handlerType.In(handlerType.NumIn() - 1)
 				event := reflect.New(eventType)
 
-				if err := json.Unmarshal(payload, event.Interface()); err != nil {
+				if err := json.Unmarshal(newPayload, event.Interface()); err != nil {
 					return nil, err
 				}
 
 				eventValue = event.Elem()
 			}
 
-			ctx = runPreHooks(ctx, payload)
 			if takesContext {
 				args = append(args, reflect.ValueOf(ctx))
 			}
