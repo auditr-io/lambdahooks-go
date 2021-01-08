@@ -296,6 +296,61 @@ func TestWrap_AppliesContextFromPreHook(t *testing.T) {
 	assert.Equal(t, pIn, pOut)
 }
 
+func TestWrap_AppliesPayloadFromPreHook(t *testing.T) {
+	expectedName := "y"
+
+	handler := func(ctx context.Context, p *person) (*person, error) {
+		return p, nil
+	}
+
+	record := &recordHook{
+		preHookFunc: func(
+			h *recordHook,
+			ctx context.Context,
+			payload []byte,
+		) (context.Context, []byte) {
+			h.MethodCalled("BeforeExecution", ctx, payload)
+
+			var p *person
+			json.Unmarshal(payload, &p)
+			p.Name = expectedName
+			payload, _ = json.Marshal(p)
+			return ctx, payload
+		},
+	}
+
+	AddPreHook(record)
+	t.Cleanup(func() {
+		RemovePreHook(record)
+	})
+
+	wrappedHandler := Wrap(handler)
+
+	pIn := &person{
+		Name: "x",
+		Age:  10,
+	}
+	payload, err := json.Marshal(pIn)
+	assert.NoError(t, err)
+
+	ctx := context.Background()
+	record.
+		On("BeforeExecution", ctx, payload).
+		Once()
+
+	awslambdaHandler := wrappedHandler.(lambda.Handler)
+	resBytes, err := awslambdaHandler.Invoke(
+		ctx,
+		payload,
+	)
+	assert.NoError(t, err)
+
+	var pOut *person
+	err = json.Unmarshal(resBytes, &pOut)
+	assert.NotEqual(t, pIn, pOut)
+	assert.Equal(t, expectedName, pOut.Name)
+}
+
 func TestWrap_RunsPostHook(t *testing.T) {
 	handler := func(ctx context.Context, p *person) (*person, error) {
 		return p, nil
