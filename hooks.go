@@ -45,6 +45,7 @@ type PostHook interface {
 	AfterExecution(
 		ctx context.Context,
 		payload []byte,
+		newPayload []byte,
 		returnValue interface{},
 		err interface{},
 	)
@@ -85,10 +86,11 @@ func runPreHooks(ctx context.Context, payload []byte) (context.Context, []byte) 
 func runPostHooks(
 	ctx context.Context,
 	payload []byte,
+	newPayload []byte,
 	returnValue interface{},
 	err interface{},
 ) {
 	for _, hook := range postHooks {
-		hook.AfterExecution(ctx, payload, returnValue, err)
+		hook.AfterExecution(ctx, payload, newPayload, returnValue, err)
 	}
 }

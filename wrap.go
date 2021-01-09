@@ -170,20 +170,22 @@ func Wrap(handlerFunc interface{}) lambda.Handler {
 
 	return lambdaHandler(
 		func(ctx context.Context, payload []byte) (interface{}, error) {
+			var newPayload []byte
+
 			defer func() {
 				if err := recover(); err != nil {
 					// Run post hooks in case of panic
-					runPostHooks(ctx, payload, nil, err)
+					runPostHooks(ctx, payload, newPayload, nil, err)
 					panic(err)
 				}
 			}()
 
-			go handleTimeout(ctx, payload)
+			go handleTimeout(ctx, payload, newPayload)
 
 			var args []reflect.Value
 			var eventValue reflect.Value
 
-			ctx, newPayload := runPreHooks(ctx, payload)
+			ctx, newPayload = runPreHooks(ctx, payload)
 
 			if (handlerType.NumIn() == 1 && !takesContext) || handlerType.NumIn() == 2 {
 				// Deserialize the last input argument and pass that on to the handler
@@ -224,7 +226,7 @@ func Wrap(handlerFunc interface{}) lambda.Handler {
 				val = nil
 			}
 
-			runPostHooks(ctx, payload, &val, err)
+			runPostHooks(ctx, payload, newPayload, &val, err)
 
 			return val, err
 		},
@@ -296,7 +298,7 @@ func validateReturns(handler reflect.Type) error {
 // signal conflicting with the actual result. The opposite may not leave
 // enough time for all post hooks to run to completion. In general, the
 // smaller the cushion the more accurate the signal
-func handleTimeout(ctx context.Context, payload []byte) {
+func handleTimeout(ctx context.Context, payload []byte, newPayload []byte) {
 	deadline, _ := ctx.Deadline()
 	if deadline.IsZero() {
 		return
@@ -311,7 +313,7 @@ func handleTimeout(ctx context.Context, payload []byte) {
 	timeoutc := timer.C
 	select {
 	case <-timeoutc:
-		runPostHooks(ctx, payload, nil, timeoutError{})
+		runPostHooks(ctx, payload, newPayload, nil, timeoutError{})
 		return
 	case <-ctx.Done():
 		timer.Stop()

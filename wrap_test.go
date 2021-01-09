@@ -29,6 +29,7 @@ type recordHook struct {
 		h *recordHook,
 		ctx context.Context,
 		payload []byte,
+		newPayload []byte,
 		returnValue interface{},
 		err interface{},
 	)
@@ -48,10 +49,11 @@ func (h *recordHook) BeforeExecution(
 func (h *recordHook) AfterExecution(
 	ctx context.Context,
 	payload []byte,
+	newPayload []byte,
 	returnValue interface{},
 	err interface{},
 ) {
-	h.postHookFunc(h, ctx, payload, returnValue, err)
+	h.postHookFunc(h, ctx, payload, newPayload, returnValue, err)
 }
 
 type mockStarterFunc struct {
@@ -119,6 +121,7 @@ func TestInit_AddsPostHooks(t *testing.T) {
 				h *recordHook,
 				ctx context.Context,
 				payload []byte,
+				newPayload []byte,
 				returnValue interface{},
 				err interface{},
 			) {
@@ -129,6 +132,7 @@ func TestInit_AddsPostHooks(t *testing.T) {
 				h *recordHook,
 				ctx context.Context,
 				payload []byte,
+				newPayload []byte,
 				returnValue interface{},
 				err interface{},
 			) {
@@ -314,8 +318,8 @@ func TestWrap_AppliesPayloadFromPreHook(t *testing.T) {
 			var p *person
 			json.Unmarshal(payload, &p)
 			p.Name = expectedName
-			payload, _ = json.Marshal(p)
-			return ctx, payload
+			newPayload, _ := json.Marshal(p)
+			return ctx, newPayload
 		},
 	}
 
@@ -361,12 +365,13 @@ func TestWrap_RunsPostHook(t *testing.T) {
 			h *recordHook,
 			ctx context.Context,
 			payload []byte,
+			newPayload []byte,
 			returnValue interface{},
 			err interface{},
 		) {
 			returnInterface := returnValue.(*interface{})
 			p := (*returnInterface).(*person)
-			h.MethodCalled("AfterExecution", ctx, payload, p, err)
+			h.MethodCalled("AfterExecution", ctx, payload, newPayload, p, err)
 		},
 	}
 
@@ -386,7 +391,7 @@ func TestWrap_RunsPostHook(t *testing.T) {
 
 	ctx := context.Background()
 	record.
-		On("AfterExecution", ctx, payload, pIn, nil).
+		On("AfterExecution", ctx, payload, payload, pIn, nil).
 		Once()
 
 	awslambdaHandler := wrappedHandler.(lambda.Handler)
@@ -413,6 +418,7 @@ func TestWrap_RunsPostHookOnPanic(t *testing.T) {
 			h *recordHook,
 			ctx context.Context,
 			payload []byte,
+			newPayload []byte,
 			returnValue interface{},
 			err interface{},
 		) {
@@ -448,6 +454,74 @@ func TestWrap_RunsPostHookOnPanic(t *testing.T) {
 	})
 }
 
+func TestWrap_PostHookCapturesNewPayloadOnPanic(t *testing.T) {
+	expectedPanicErr := "argghhhh!"
+
+	handler := func(ctx context.Context, p *person) (*person, error) {
+		panic(expectedPanicErr)
+	}
+
+	pIn := &person{
+		Name: "x",
+		Age:  10,
+	}
+	payload, err := json.Marshal(pIn)
+	assert.NoError(t, err)
+
+	pExpected := pIn
+	pExpected.Name = "y"
+	expectedPayload, err := json.Marshal(pIn)
+	assert.NoError(t, err)
+
+	record := &recordHook{
+		preHookFunc: func(
+			h *recordHook,
+			ctx context.Context,
+			payload []byte,
+		) (context.Context, []byte) {
+			var p *person
+			json.Unmarshal(payload, &p)
+			p.Name = "y"
+			newPayload, _ := json.Marshal(p)
+
+			assert.Equal(t, expectedPayload, newPayload)
+			return ctx, newPayload
+		},
+		postHookFunc: func(
+			h *recordHook,
+			ctx context.Context,
+			payload []byte,
+			newPayload []byte,
+			returnValue interface{},
+			err interface{},
+		) {
+			e := err.(string)
+			h.MethodCalled("AfterExecution", ctx, payload, newPayload, returnValue, e)
+		},
+	}
+
+	AddPreHook(record)
+	AddPostHook(record)
+	t.Cleanup(func() {
+		RemovePreHook(record)
+		RemovePostHook(record)
+	})
+
+	ctx := context.Background()
+	record.
+		On("AfterExecution", ctx, payload, expectedPayload, nil, expectedPanicErr).
+		Once()
+
+	wrappedHandler := Wrap(handler)
+	awslambdaHandler := wrappedHandler.(lambda.Handler)
+	assert.PanicsWithValue(t, expectedPanicErr, func() {
+		awslambdaHandler.Invoke(
+			ctx,
+			payload,
+		)
+	})
+}
+
 func TestHandleTimeout_ReturnsAtDeadline(t *testing.T) {
 	ctx, cancel := context.WithDeadline(context.Background(), time.Now())
 	defer func() {
@@ -461,6 +535,7 @@ func TestHandleTimeout_ReturnsAtDeadline(t *testing.T) {
 			h *recordHook,
 			ctx context.Context,
 			payload []byte,
+			newPayload []byte,
 			returnValue interface{},
 			err interface{},
 		) {
@@ -474,7 +549,7 @@ func TestHandleTimeout_ReturnsAtDeadline(t *testing.T) {
 		RemovePostHook(record)
 	})
 
-	handleTimeout(ctx, payload)
+	handleTimeout(ctx, payload, payload)
 	record.AssertNotCalled(t, "AfterExecution", ctx, payload, nil, timeoutError{})
 }
 
@@ -489,6 +564,7 @@ func TestHandleTimeout_ReturnsAtThreshold(t *testing.T) {
 			h *recordHook,
 			ctx context.Context,
 			payload []byte,
+			newPayload []byte,
 			returnValue interface{},
 			err interface{},
 		) {
@@ -515,7 +591,7 @@ func TestHandleTimeout_ReturnsAtThreshold(t *testing.T) {
 		cancel()
 	}()
 
-	handleTimeout(ctx, payload)
+	handleTimeout(ctx, payload, payload)
 	record.AssertNotCalled(t, "AfterExecution", ctx, payload, nil, timeoutError{})
 }
 
@@ -530,6 +606,7 @@ func TestHandleTimeout_ReturnsAtCompletion(t *testing.T) {
 			h *recordHook,
 			ctx context.Context,
 			payload []byte,
+			newPayload []byte,
 			returnValue interface{},
 			err interface{},
 		) {
@@ -557,7 +634,7 @@ func TestHandleTimeout_ReturnsAtCompletion(t *testing.T) {
 	}()
 
 	cancel()
-	handleTimeout(ctx, payload)
+	handleTimeout(ctx, payload, payload)
 	record.AssertNotCalled(t, "AfterExecution", ctx, payload, nil, timeoutError{})
 }
 
@@ -572,6 +649,7 @@ func TestHandleTimeout_RunsPostHooksBeforeThreshold(t *testing.T) {
 			h *recordHook,
 			ctx context.Context,
 			payload []byte,
+			newPayload []byte,
 			returnValue interface{},
 			err interface{},
 		) {
@@ -602,6 +680,77 @@ func TestHandleTimeout_RunsPostHooksBeforeThreshold(t *testing.T) {
 		RemovePostHook(record)
 	})
 
-	handleTimeout(ctx, payload)
+	handleTimeout(ctx, payload, payload)
+	assert.True(t, record.AssertExpectations(t))
+}
+
+func TestHandleTimeout_PostHookCapturesNewPayloadBeforeThreshold(t *testing.T) {
+	origDeadlineCushion := deadlineCushion
+	newDeadlineCushion := 10 * time.Millisecond
+
+	pIn := &person{
+		Name: "x",
+		Age:  10,
+	}
+	payload, err := json.Marshal(pIn)
+	assert.NoError(t, err)
+
+	pExpected := pIn
+	pExpected.Name = "y"
+	expectedPayload, err := json.Marshal(pIn)
+	assert.NoError(t, err)
+
+	record := &recordHook{
+		preHookFunc: func(
+			h *recordHook,
+			ctx context.Context,
+			payload []byte,
+		) (context.Context, []byte) {
+			var p *person
+			json.Unmarshal(payload, &p)
+			p.Name = "y"
+			newPayload, _ := json.Marshal(p)
+
+			assert.Equal(t, expectedPayload, newPayload)
+			return ctx, newPayload
+		},
+		postHookFunc: func(
+			h *recordHook,
+			ctx context.Context,
+			payload []byte,
+			newPayload []byte,
+			returnValue interface{},
+			err interface{},
+		) {
+			e := err.(timeoutError)
+			h.MethodCalled("AfterExecution", ctx, payload, newPayload, returnValue, e)
+		},
+	}
+
+	ctx, cancel := context.WithDeadline(
+		context.Background(),
+		time.Now().Add(2*newDeadlineCushion),
+	)
+	defer func() {
+		cancel()
+	}()
+
+	record.
+		On("AfterExecution", ctx, payload, expectedPayload, nil, timeoutError{}).
+		Once()
+
+	Init(
+		WithDeadlineCushion(newDeadlineCushion),
+		WithPreHooks(record),
+		WithPostHooks(record),
+	)
+
+	t.Cleanup(func() {
+		deadlineCushion = origDeadlineCushion
+		RemovePreHook(record)
+		RemovePostHook(record)
+	})
+
+	handleTimeout(ctx, payload, expectedPayload)
 	assert.True(t, record.AssertExpectations(t))
 }
