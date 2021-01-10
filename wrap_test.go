@@ -31,7 +31,7 @@ type recordHook struct {
 		payload []byte,
 		newPayload []byte,
 		returnValue interface{},
-		err interface{},
+		errorValue interface{},
 	)
 }
 
@@ -51,9 +51,9 @@ func (h *recordHook) AfterExecution(
 	payload []byte,
 	newPayload []byte,
 	returnValue interface{},
-	err interface{},
+	errorValue interface{},
 ) {
-	h.postHookFunc(h, ctx, payload, newPayload, returnValue, err)
+	h.postHookFunc(h, ctx, payload, newPayload, returnValue, errorValue)
 }
 
 type mockStarterFunc struct {
@@ -123,7 +123,7 @@ func TestInit_AddsPostHooks(t *testing.T) {
 				payload []byte,
 				newPayload []byte,
 				returnValue interface{},
-				err interface{},
+				errorValue interface{},
 			) {
 			},
 		},
@@ -134,7 +134,7 @@ func TestInit_AddsPostHooks(t *testing.T) {
 				payload []byte,
 				newPayload []byte,
 				returnValue interface{},
-				err interface{},
+				errorValue interface{},
 			) {
 			},
 		},
@@ -367,11 +367,11 @@ func TestWrap_RunsPostHook(t *testing.T) {
 			payload []byte,
 			newPayload []byte,
 			returnValue interface{},
-			err interface{},
+			errorValue interface{},
 		) {
 			returnInterface := returnValue.(*interface{})
 			p := (*returnInterface).(*person)
-			h.MethodCalled("AfterExecution", ctx, payload, newPayload, p, err)
+			h.MethodCalled("AfterExecution", ctx, payload, newPayload, p, errorValue)
 		},
 	}
 
@@ -420,9 +420,9 @@ func TestWrap_RunsPostHookOnPanic(t *testing.T) {
 			payload []byte,
 			newPayload []byte,
 			returnValue interface{},
-			err interface{},
+			errorValue interface{},
 		) {
-			e := err.(string)
+			e := errorValue.(string)
 			h.MethodCalled("AfterExecution", ctx, payload, returnValue, e)
 		},
 	}
@@ -493,9 +493,9 @@ func TestWrap_PostHookCapturesNewPayloadOnPanic(t *testing.T) {
 			payload []byte,
 			newPayload []byte,
 			returnValue interface{},
-			err interface{},
+			errorValue interface{},
 		) {
-			e := err.(string)
+			e := errorValue.(string)
 			h.MethodCalled("AfterExecution", ctx, payload, newPayload, returnValue, e)
 		},
 	}
@@ -537,9 +537,9 @@ func TestHandleTimeout_ReturnsAtDeadline(t *testing.T) {
 			payload []byte,
 			newPayload []byte,
 			returnValue interface{},
-			err interface{},
+			errorValue interface{},
 		) {
-			e := err.(timeoutError)
+			e := errorValue.(timeoutError)
 			h.MethodCalled("AfterExecution", ctx, payload, returnValue, e)
 		},
 	}
@@ -566,9 +566,9 @@ func TestHandleTimeout_ReturnsAtThreshold(t *testing.T) {
 			payload []byte,
 			newPayload []byte,
 			returnValue interface{},
-			err interface{},
+			errorValue interface{},
 		) {
-			e := err.(timeoutError)
+			e := errorValue.(timeoutError)
 			h.MethodCalled("AfterExecution", ctx, payload, returnValue, e)
 		},
 	}
@@ -608,9 +608,9 @@ func TestHandleTimeout_ReturnsAtCompletion(t *testing.T) {
 			payload []byte,
 			newPayload []byte,
 			returnValue interface{},
-			err interface{},
+			errorValue interface{},
 		) {
-			e := err.(timeoutError)
+			e := errorValue.(timeoutError)
 			h.MethodCalled("AfterExecution", ctx, payload, returnValue, e)
 		},
 	}
@@ -651,9 +651,9 @@ func TestHandleTimeout_RunsPostHooksBeforeThreshold(t *testing.T) {
 			payload []byte,
 			newPayload []byte,
 			returnValue interface{},
-			err interface{},
+			errorValue interface{},
 		) {
-			e := err.(timeoutError)
+			e := errorValue.(timeoutError)
 			h.MethodCalled("AfterExecution", ctx, payload, returnValue, e)
 		},
 	}
@@ -720,9 +720,9 @@ func TestHandleTimeout_PostHookCapturesNewPayloadBeforeThreshold(t *testing.T) {
 			payload []byte,
 			newPayload []byte,
 			returnValue interface{},
-			err interface{},
+			errorValue interface{},
 		) {
-			e := err.(timeoutError)
+			e := errorValue.(timeoutError)
 			h.MethodCalled("AfterExecution", ctx, payload, newPayload, returnValue, e)
 		},
 	}
